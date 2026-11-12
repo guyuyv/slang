@@ -960,6 +960,77 @@ endmodule
     CHECK(diags[9].code == diag::MissingFormatSpecifier);
 }
 
+TEST_CASE("Scan format strings - constant format bytes") {
+    auto tree = SyntaxTree::fromText(R"(
+module m;
+    localparam FORMAT = "%\000d";
+    localparam [39:0] PADDED_FORMAT = FORMAT;
+    localparam byte ARRAY_FORMAT[3] = '{8'h25, 0, 8'h64};
+    localparam byte QUEUE_FORMAT[$] = '{8'h25, 0, 8'h64};
+    localparam [16:0] PARTIAL_BYTE_FORMAT = 17'h02564;
+    localparam PLUS_FORMAT = "COUNT=%\000d";
+    int value;
+    int values[2];
+    initial begin
+        void'($sscanf("42", "%\000d", value));
+        void'($sscanf("42", FORMAT, value));
+        void'($sscanf("42", {"%", 8'b0, "d"}, value));
+        void'($sscanf("42", PADDED_FORMAT, value));
+        void'($sscanf("42", ARRAY_FORMAT, value));
+        void'($sscanf("42", QUEUE_FORMAT, value));
+        void'($value$plusargs("COUNT=%\000d", value));
+        void'($value$plusargs(PLUS_FORMAT, value));
+        void'($sscanf("42", PARTIAL_BYTE_FORMAT, values));
+    end
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+
+    auto& diags = compilation.getAllDiagnostics();
+    REQUIRE(diags.size() == 9);
+    for (size_t i = 0; i < 8; i++)
+        CHECK(diags[i].code == diag::UnknownFormatSpecifier);
+    CHECK(diags[8].code == diag::FormatMismatchedType);
+}
+
+TEST_CASE("Scan format strings - string conversions and padding") {
+    auto tree = SyntaxTree::fromText(R"(
+module m;
+    localparam string STRING_FORMAT = "%\000d";
+    localparam [31:0] PADDED_FORMAT = "%d";
+    localparam [16:0] PARTIAL_BYTE_FORMAT = 17'h02564;
+    localparam byte QUEUE_FORMAT[$] = '{8'h25, 8'h64};
+    int value;
+    initial begin
+        void'($sscanf("42", STRING_FORMAT, value));
+        void'($sscanf("42", string'("%\000d"), value));
+        void'($sscanf("42", PADDED_FORMAT, value));
+        void'($sscanf("42", PARTIAL_BYTE_FORMAT, value));
+        void'($sscanf("42", QUEUE_FORMAT, value));
+        void'($value$plusargs(string'("COUNT=%\000d"), value));
+    end
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+}
+
+TEST_CASE("Scan format strings - long suppressed format") {
+    std::string text = "module m; initial void'($sscanf(\"\", \"";
+    for (size_t i = 0; i < 16000; i++)
+        text += "%*d";
+    text += "\")); endmodule";
+
+    auto tree = SyntaxTree::fromText(text);
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+}
+
 TEST_CASE("warning for skipped system tasks in constant functions") {
     auto tree = SyntaxTree::fromText(R"(
 module m;
