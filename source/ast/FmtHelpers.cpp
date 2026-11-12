@@ -264,7 +264,7 @@ bool FmtHelpers::checkScanArgs(const ASTContext& context, const Args& args, bool
         }
 
         char c = format[i];
-        char spec = charToLower(c);
+        char spec = isASCII(c) ? charToLower(c) : c;
         auto range = [&]() { return getRange(start, i - start + 1); };
         std::string_view allowed = isPlusArgs ? "dohxbefgs%" : "dohxbefgscuzvtm%";
         if (allowed.find(spec) == std::string_view::npos) {

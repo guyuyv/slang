@@ -980,6 +980,8 @@ module m;
         void'($sscanf("42", QUEUE_FORMAT, value));
         void'($value$plusargs("COUNT=%\000d", value));
         void'($value$plusargs(PLUS_FORMAT, value));
+        void'($sscanf("", "%\200", value));
+        void'($value$plusargs("N=%\200", value));
         void'($sscanf("42", PARTIAL_BYTE_FORMAT, values));
     end
 endmodule
@@ -989,10 +991,10 @@ endmodule
     compilation.addSyntaxTree(tree);
 
     auto& diags = compilation.getAllDiagnostics();
-    REQUIRE(diags.size() == 9);
-    for (size_t i = 0; i < 8; i++)
+    REQUIRE(diags.size() == 11);
+    for (size_t i = 0; i < 10; i++)
         CHECK(diags[i].code == diag::UnknownFormatSpecifier);
-    CHECK(diags[8].code == diag::FormatMismatchedType);
+    CHECK(diags[10].code == diag::FormatMismatchedType);
 }
 
 TEST_CASE("Scan format strings - string conversions and padding") {
