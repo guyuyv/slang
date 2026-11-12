@@ -5,6 +5,7 @@
 // SPDX-FileCopyrightText: Michael Popoloski
 // SPDX-License-Identifier: MIT
 //------------------------------------------------------------------------------
+#include "../FmtHelpers.h"
 #include "Builtins.h"
 
 #include "slang/ast/Compilation.h"
@@ -137,7 +138,9 @@ public:
             return comp.getErrorType();
         }
 
-        // TODO: add some compile-time checking of the format string here
+        if (!FmtHelpers::checkScanArgs(context, args.subspan(1)))
+            return comp.getErrorType();
+
         return comp.getIntegerType();
     }
 

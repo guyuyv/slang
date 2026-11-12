@@ -16,6 +16,7 @@
 #include "slang/ast/types/AllTypes.h"
 #include "slang/diagnostics/SysFuncsDiags.h"
 #include "slang/parsing/Lexer.h"
+#include "slang/text/CharInfo.h"
 #include "slang/util/String.h"
 
 namespace slang::ast {
@@ -196,6 +197,104 @@ bool FmtHelpers::checkSFormatArgs(const ASTContext& context, const Args& args) {
     }
 
     return true;
+}
+
+bool FmtHelpers::checkScanArgs(const ASTContext& context, const Args& args) {
+    auto& formatArg = *args[0];
+    auto value = context.tryEval(formatArg);
+    // Unknown bits cause scanning to fail at runtime, not a format mismatch.
+    if (!value || value.hasUnknown())
+        return true;
+    auto literal = formatArg.kind == ExpressionKind::StringLiteral ? &formatArg.as<StringLiteral>()
+                                                                   : nullptr;
+    std::string formatStorage;
+    if (!literal) {
+        if (value.isString()) {
+            formatStorage = std::move(value).str();
+        }
+        else if (value.isInteger()) {
+            // Ignore leading padding, but keep embedded NULs instead of casting to string.
+            auto& bits = value.integer();
+            for (int32_t msb = int32_t(bits.getBitWidth()) - 1; msb >= 0;) {
+                int32_t lsb = msb / 8 * 8;
+                auto c = bits.slice(msb, lsb).as<uint8_t>().value();
+                if (c || !formatStorage.empty())
+                    formatStorage.push_back(char(c));
+                msb = lsb - 1;
+            }
+        }
+        else {
+            for (auto& elem : value)
+                formatStorage.push_back(char(elem.integer().as<uint8_t>().value()));
+        }
+    }
+    std::string_view format = literal ? literal->getValue() : formatStorage;
+    auto getRange = [&](size_t offset, size_t len) {
+        if (!literal)
+            return formatArg.sourceRange;
+
+        size_t charLen = 1;
+        auto start = parsing::Lexer::getLocForStringChar(literal->getRawValue(), offset, charLen);
+        start -= charLen;
+        auto end = parsing::Lexer::getLocForStringChar(literal->getRawValue(), offset + len - 1,
+                                                       charLen);
+        return SourceRange{literal->sourceRange.start() + start,
+                           literal->sourceRange.start() + end};
+    };
+
+    auto argIt = args.begin() + 1;
+    bool ok = true;
+    for (size_t i = 0; i < format.size(); i++) {
+        if (format[i] != '%')
+            continue;
+
+        size_t start = i++;
+        bool suppress = i < format.size() && format[i] == '*';
+        if (suppress)
+            i++;
+
+        while (i < format.size() && isDecimalDigit(format[i]))
+            i++;
+        if (i == format.size()) {
+            context.addDiag(diag::MissingFormatSpecifier, getRange(start, i - start));
+            return ok;
+        }
+
+        char c = format[i];
+        char spec = charToLower(c);
+        auto range = [&]() { return getRange(start, i - start + 1); };
+        std::string_view allowed = "dohxbefgscuzvtm%";
+        if (allowed.find(spec) == std::string_view::npos) {
+            context.addDiag(diag::UnknownFormatSpecifier, range()) << c;
+            return false;
+        }
+        if (suppress || spec == '%')
+            continue;
+
+        if (argIt == args.end()) {
+            context.addDiag(diag::FormatNoArgument, range()) << c;
+            ok = false;
+            continue;
+        }
+        auto& arg = **argIt++;
+        if (arg.bad())
+            return false;
+
+        auto& type = *arg.type;
+        bool validType;
+        if (spec == 's' || spec == 'm')
+            validType = type.canBeStringLike();
+        else if (spec == 'v')
+            validType = type.isIntegral();
+        else
+            validType = type.isNumeric();
+        if (!validType) {
+            context.addDiag(diag::FormatMismatchedType, arg.sourceRange) << type << c << range();
+            ok = false;
+        }
+    }
+
+    return ok;
 }
 
 static bool formatSpecialArg(char spec, const Scope& scope, std::string& result) {

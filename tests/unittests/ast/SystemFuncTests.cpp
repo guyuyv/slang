@@ -770,6 +770,121 @@ endmodule
     CHECK(diags.size() == 18);
 }
 
+TEST_CASE("Scan format strings - valid arguments") {
+    auto tree = SyntaxTree::fromText(R"(
+module m(input string runtimeFormat);
+    typedef enum int { first, second } code_t;
+    typedef byte byte_t;
+    code_t code;
+    struct packed { int value; } packedValue;
+    byte_t bytes[8];
+    byte dynamicBytes[];
+    byte queuedBytes[$];
+    int value;
+    real realValue;
+    string text;
+    localparam string formatString = "%d";
+    localparam logic [15:0] packedFormat = "%s";
+    localparam byte arrayFormat[2] = '{8'h25, 8'h64};
+    localparam logic [15:0] unknownFormat = 16'h25xx;
+    initial begin
+        void'($sscanf("1 23 % hello", "%*d %3d %% %s", value, text));
+        void'($sscanf("1", formatString, code));
+        void'($sscanf("ff", "%H", packedValue));
+        void'($sscanf("1.5", "%e %F %g %t", realValue, realValue, value, value));
+        void'($sscanf("1", "%d", realValue));
+        void'($sscanf("hello", packedFormat, bytes));
+        void'($sscanf("hello", "%s %s", dynamicBytes, queuedBytes));
+        void'($sscanf("", "%m", text));
+        void'($sscanf("", "%c %v %u %z %x %b %o", value, value, value,
+                      value, value, value, value));
+        void'($sscanf("1", "%d", value, bytes)); // Excess arguments are ignored.
+        void'($sscanf("1", "%*d"));
+        void'($sscanf("", "%%"));
+        void'($sscanf("%", "%*%"));
+        void'($sscanf("%", "%3%"));
+        void'($sscanf("1", "%999999999999999999999999d", value));
+        void'($sscanf("1", runtimeFormat, value));
+        void'($sscanf("1", arrayFormat, value));
+        void'($sscanf("1", unknownFormat, value));
+        void'($fscanf(0, "%*d %03d", value));
+    end
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+}
+
+TEST_CASE("Scan format strings - errors") {
+    auto tree = SyntaxTree::fromText(R"(
+class C; endclass
+module m;
+    int values[2];
+    struct { int value; } recordValue;
+    real realValue;
+    string text;
+    C obj;
+    localparam string formatString = "%d";
+    initial begin
+        void'($sscanf("42", "%d", values));
+        void'($fscanf(0, "%h", recordValue));
+        void'($sscanf("hello", "%s", realValue));
+        void'($sscanf("1.5", "%f", text));
+        void'($sscanf("", "%u", recordValue));
+        void'($sscanf("", "%m", obj));
+        void'($sscanf("42", "%d"));
+        void'($sscanf("1 hello", "%*d %s", realValue));
+        void'($sscanf("42", "%q", values));
+        void'($sscanf("", "%"));
+        void'($sscanf("", "%*"));
+        void'($sscanf("42", formatString, values));
+        void'($sscanf("42", {"%", "d"}, values));
+        void'($sscanf("hello", "\x25s", realValue));
+        void'($sscanf("St1", "%v", realValue));
+    end
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+
+    auto& diags = compilation.getAllDiagnostics();
+    REQUIRE(diags.size() == 15);
+    for (size_t i = 0; i < 6; i++)
+        CHECK(diags[i].code == diag::FormatMismatchedType);
+    CHECK(diags[6].code == diag::FormatNoArgument);
+    CHECK(diags[7].code == diag::FormatMismatchedType);
+    CHECK(diags[8].code == diag::UnknownFormatSpecifier);
+    CHECK(diags[9].code == diag::MissingFormatSpecifier);
+    CHECK(diags[10].code == diag::MissingFormatSpecifier);
+    for (size_t i = 11; i < 15; i++)
+        CHECK(diags[i].code == diag::FormatMismatchedType);
+}
+
+TEST_CASE("Scan format strings - escaped diagnostic ranges") {
+    std::string_view text = R"(
+module m;
+    real value;
+    initial void'($sscanf("hello", "\x25\163", value));
+endmodule
+)";
+    auto tree = SyntaxTree::fromText(text);
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+
+    auto& diags = compilation.getAllDiagnostics();
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == diag::FormatMismatchedType);
+    REQUIRE(diags[0].ranges.size() == 2);
+    std::string_view rawSpec = R"(\x25\163)";
+    auto offset = text.find(rawSpec);
+    auto range = diags[0].ranges.back();
+    CHECK(range.start().offset() == offset);
+    CHECK(range.end().offset() == offset + rawSpec.size());
+}
+
 TEST_CASE("warning for skipped system tasks in constant functions") {
     auto tree = SyntaxTree::fromText(R"(
 module m;
@@ -1309,7 +1424,7 @@ module m(input logic clk);
     bit w3;
     assign w2 = $random();
     assign w3 = $countdrivers(n);
-    assign w4 = $sscanf(str, "%d");
+    assign w4 = $sscanf(str, "%*d");
     a1: assert property (@(posedge clk) $random != 0);
     always @($random) x = 1;
 
