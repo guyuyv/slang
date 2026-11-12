@@ -885,6 +885,81 @@ endmodule
     CHECK(range.end().offset() == offset + rawSpec.size());
 }
 
+TEST_CASE("Value plusargs format strings - valid arguments") {
+    auto tree = SyntaxTree::fromText(R"(
+module m(input string runtimeFormat);
+    int value;
+    real realValue;
+    string text;
+    byte bytes[8];
+    localparam string formatString = "COUNT=%d";
+    localparam logic [15:0] unknownFormat = 16'h25xx;
+    initial begin
+        void'($value$plusargs(formatString, value));
+        void'($value$plusargs({"COUNT=", "%d"}, value));
+        void'($value$plusargs("VALUE=%b", value));
+        void'($value$plusargs("VALUE=%o", value));
+        void'($value$plusargs("VALUE=%h", value));
+        void'($value$plusargs("VALUE=%X", value));
+        void'($value$plusargs("VALUE=%0E", realValue));
+        void'($value$plusargs("VALUE=%f", realValue));
+        void'($value$plusargs("VALUE=%g", value));
+        void'($value$plusargs("VALUE=%d", realValue));
+        void'($value$plusargs("VALUE=%s", text));
+        void'($value$plusargs("VALUE=%s", bytes));
+        void'($value$plusargs("VALUE=%s", value));
+        void'($value$plusargs(runtimeFormat, value));
+        void'($value$plusargs(unknownFormat, value));
+        void'($value$plusargs("PERCENT=%% VALUE=%00d", value));
+        void'($value$plusargs("PERCENT=%0% VALUE=%s", text));
+        void'($value$plusargs("VALUE=%d ignored=%q", value));
+    end
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+}
+
+TEST_CASE("Value plusargs format strings - errors") {
+    auto tree = SyntaxTree::fromText(R"(
+module m;
+    int value;
+    real realValue;
+    string text;
+    localparam string formatString = "COUNT=%d";
+    initial begin
+        void'($value$plusargs("COUNT=%c", value));
+        void'($value$plusargs("COUNT=%m", text));
+        void'($value$plusargs("COUNT=%*d", value));
+        void'($value$plusargs("COUNT=%2d", value));
+        void'($value$plusargs("COUNT=%q", value));
+        void'($value$plusargs("COUNT=%f", text));
+        void'($value$plusargs("COUNT=%s", realValue));
+        void'($value$plusargs(formatString, text));
+        void'($value$plusargs("COUNT=", value));
+        void'($value$plusargs("COUNT=%", value));
+    end
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+
+    auto& diags = compilation.getAllDiagnostics();
+    REQUIRE(diags.size() == 10);
+    CHECK(diags[0].code == diag::UnknownFormatSpecifier);
+    CHECK(diags[1].code == diag::UnknownFormatSpecifier);
+    CHECK(diags[2].code == diag::UnknownFormatSpecifier);
+    CHECK(diags[3].code == diag::FormatSpecifierWidthNotAllowed);
+    CHECK(diags[4].code == diag::UnknownFormatSpecifier);
+    for (size_t i = 5; i < 8; i++)
+        CHECK(diags[i].code == diag::FormatMismatchedType);
+    CHECK(diags[8].code == diag::MissingFormatSpecifier);
+    CHECK(diags[9].code == diag::MissingFormatSpecifier);
+}
+
 TEST_CASE("warning for skipped system tasks in constant functions") {
     auto tree = SyntaxTree::fromText(R"(
 module m;

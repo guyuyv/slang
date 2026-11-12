@@ -138,7 +138,7 @@ public:
             return comp.getErrorType();
         }
 
-        if (!FmtHelpers::checkScanArgs(context, args.subspan(1)))
+        if (!FmtHelpers::checkScanArgs(context, args.subspan(1), /* isPlusArgs */ false))
             return comp.getErrorType();
 
         return comp.getIntegerType();

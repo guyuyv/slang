@@ -104,11 +104,12 @@ public:
             return comp.getErrorType();
         }
 
-        // TODO: if the first argument is known at compile time, do more specific
-        // checking of the second argument.
         const Type& st = *args[1]->type;
         if (!st.canBeStringLike() && !st.isFloating())
             return badArg(context, *args[1]);
+
+        if (!FmtHelpers::checkScanArgs(context, args, /* isPlusArgs */ true))
+            return comp.getErrorType();
 
         return comp.getIntType();
     }

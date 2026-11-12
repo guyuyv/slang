@@ -199,7 +199,7 @@ bool FmtHelpers::checkSFormatArgs(const ASTContext& context, const Args& args) {
     return true;
 }
 
-bool FmtHelpers::checkScanArgs(const ASTContext& context, const Args& args) {
+bool FmtHelpers::checkScanArgs(const ASTContext& context, const Args& args, bool isPlusArgs) {
     auto& formatArg = *args[0];
     auto value = context.tryEval(formatArg);
     // Unknown bits cause scanning to fail at runtime, not a format mismatch.
@@ -249,12 +249,15 @@ bool FmtHelpers::checkScanArgs(const ASTContext& context, const Args& args) {
             continue;
 
         size_t start = i++;
-        bool suppress = i < format.size() && format[i] == '*';
+        bool suppress = !isPlusArgs && i < format.size() && format[i] == '*';
         if (suppress)
             i++;
 
-        while (i < format.size() && isDecimalDigit(format[i]))
+        bool nonzeroWidth = false;
+        while (i < format.size() && isDecimalDigit(format[i])) {
+            nonzeroWidth |= format[i] != '0';
             i++;
+        }
         if (i == format.size()) {
             context.addDiag(diag::MissingFormatSpecifier, getRange(start, i - start));
             return ok;
@@ -263,9 +266,13 @@ bool FmtHelpers::checkScanArgs(const ASTContext& context, const Args& args) {
         char c = format[i];
         char spec = charToLower(c);
         auto range = [&]() { return getRange(start, i - start + 1); };
-        std::string_view allowed = "dohxbefgscuzvtm%";
+        std::string_view allowed = isPlusArgs ? "dohxbefgs%" : "dohxbefgscuzvtm%";
         if (allowed.find(spec) == std::string_view::npos) {
             context.addDiag(diag::UnknownFormatSpecifier, range()) << c;
+            return false;
+        }
+        if (isPlusArgs && nonzeroWidth) {
+            context.addDiag(diag::FormatSpecifierWidthNotAllowed, range()) << c;
             return false;
         }
         if (suppress || spec == '%')
@@ -292,8 +299,14 @@ bool FmtHelpers::checkScanArgs(const ASTContext& context, const Args& args) {
             context.addDiag(diag::FormatMismatchedType, arg.sourceRange) << type << c << range();
             ok = false;
         }
+
+        // Plusargs uses only the conversion following the prefix, unlike scanf.
+        if (isPlusArgs)
+            return ok;
     }
 
+    if (isPlusArgs)
+        context.addDiag(diag::MissingFormatSpecifier, formatArg.sourceRange);
     return ok;
 }
 

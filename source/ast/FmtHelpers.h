@@ -34,10 +34,10 @@ public:
     static bool checkSFormatArgs(const ASTContext& context,
                                  const std::span<const Expression* const>& args);
 
-    /// Checks a compile-time scanf format string and its output arguments.
-    /// The first argument is the format string.
+    /// Checks a compile-time format string and its output arguments for scanf
+    /// or $value$plusargs. The first argument is the format string.
     static bool checkScanArgs(const ASTContext& context,
-                              const std::span<const Expression* const>& args);
+                              const std::span<const Expression* const>& args, bool isPlusArgs);
 
     /// Formats the given arguments according to the provided format string.
     /// This is the implementation of the $sformatf system function.
